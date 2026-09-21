@@ -9,6 +9,7 @@
     #pragma comment(lib, "ws2_32.lib")
     typedef SOCKET socket_t;
     #define CLOSE_SOCKET(s) closesocket(s)
+    #define SLEEP(s) Sleep(s)
     const socket_t INVALID_SOCKET_VALUE = INVALID_SOCKET;
 
 #else
@@ -18,6 +19,7 @@
     #include <unistd.h>
     typedef int socket_t;
     #define CLOSE_SOCKET(s) close(s)
+    #define SLEEP(s) sleep(s)
     const socket_t INVALID_SOCKET_VALUE = -1;
 
 #endif
@@ -56,75 +58,90 @@ int main(int argc, char* argv[])
     }
 #endif
 
-    socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (sock == INVALID_SOCKET_VALUE) 
+	while (true)
 	{
-        std::cerr << "Could not create socket\n";
-#ifdef _WIN32
-        WSACleanup();
-#endif
-        return 1;
-    }
+		std::cout << "Creating socket..." << std::endl;
+	    socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    sockaddr_in server_addr;
-    std::memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) != 1) 
-	{
-        std::cerr << "Invalid IPv4 address: " << server_ip << '\n';
-        CLOSE_SOCKET(sock);
-#ifdef _WIN32
-        WSACleanup();
-#endif
-        return 1;
-    }
-
-    if (connect(sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) != 0) 
-	{
-        std::cerr << "Could not connect to " << server_ip << ":" << port << '\n';
-        CLOSE_SOCKET(sock);
-#ifdef _WIN32
-        WSACleanup();
-#endif
-        return 1;
-    }
-
-    std::cout << "Connected to " << server_ip << ":" << port << '\n';
-    std::cout << "Enter text. Press Ctrl+D (Linux) or Ctrl+Z then Enter (Windows) to exit.\n";
-
-    std::string message;
-    char reply[256];
-
-    while (std::getline(std::cin, message)) 
-	{
-        message += '\n';
-
-        if (!send_all(sock, message.c_str(), message.size())) 
+    	if (sock == INVALID_SOCKET_VALUE) 
 		{
-            std::cerr << "Send failed\n";
-            break;
-        }
-
-        int received = recv(sock, reply, sizeof(reply) - 1, 0);
-
-        if (received <= 0) 
-		{
-            std::cout << "Server disconnected\n";
-            break;
-        }
-
-        reply[received] = '\0';
-        std::cout << "Server reply: " << reply;
-    }
-
-    CLOSE_SOCKET(sock);
-
+        	std::cerr << "Could not create socket\n";
 #ifdef _WIN32
-    WSACleanup();
+        	//WSACleanup();
+#endif
+			SLEEP(10);
+			continue;
+        	//return 1;
+    	}
+		std::cout << "Socket created" << std::endl;
+
+    	sockaddr_in server_addr;
+    	std::memset(&server_addr, 0, sizeof(server_addr));
+    	server_addr.sin_family = AF_INET;
+    	server_addr.sin_port = htons(port);
+
+    	if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) != 1) 
+		{
+        	std::cerr << "Invalid IPv4 address: " << server_ip << '\n';
+        	//CLOSE_SOCKET(sock);
+#ifdef _WIN32
+        	//WSACleanup();
+#endif
+			SLEEP(10);
+			continue;
+        	//return 1;
+    	}
+
+		while (true)
+		{
+    		if (connect(sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) != 0) 
+			{
+        		std::cerr << "Could not connect to " << server_ip << ":" << port << '\n';
+        		//CLOSE_SOCKET(sock);
+#ifdef _WIN32
+        		//WSACleanup();
+#endif
+				std::cout << "Retrying..." << std::endl;
+				SLEEP (10);
+        		continue;
+    		}
+			std::cout << "Connected" << std::endl;
+			break;
+		}
+
+    	std::cout << "Connected to " << server_ip << ":" << port << '\n';
+    	std::cout << "Enter text. Press Ctrl+D (Linux) or Ctrl+Z then Enter (Windows) to exit.\n";
+
+    	std::string message;
+    	char reply[256];
+
+    	while (std::getline(std::cin, message)) 
+		{
+        	message += '\n';
+
+        	if (!send_all(sock, message.c_str(), message.size())) 
+			{
+            	std::cerr << "Send failed\n";
+            	break;
+        	}
+
+        	int received = recv(sock, reply, sizeof(reply) - 1, 0);
+
+        	if (received <= 0) 
+			{
+            	std::cout << "Server disconnected\n";
+            	break;
+        	}
+
+        	reply[received] = '\0';
+        	std::cout << "Server reply: " << reply;
+    	}
+
+    	CLOSE_SOCKET(sock);
+	}
+#ifdef _WIN32
+   	WSACleanup();
 #endif
 
-    return 0;
+   	return 0;
 }
