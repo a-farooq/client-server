@@ -84,16 +84,22 @@ int main()
         char client_ip[INET_ADDRSTRLEN] = {};
         inet_ntop(AF_INET, &client_address.sin_addr, client_ip, sizeof(client_ip));
 
-        std::cout << "Client connected: " << client_ip << '\n';
+        std::cout << "Client connected from: " << client_ip << '\n';
 
         char buffer[4096];
-        int received;
+        memset (buffer, '\0', sizeof(buffer));
 
-        while ((received = recv(client_fd, buffer, sizeof(buffer) - 1, 0)) > 0) 
+        int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+        buffer[bytes_received] = '\0';
+        std::cout << "Client details: " << buffer << '\n';
+
+        memset (buffer, '\0', sizeof(buffer));
+
+        while ((bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0)) > 0) 
 		{
-            buffer[received] = '\0';
+            buffer[bytes_received] = '\0';
 
-            std::cout << "Received: " << buffer << '\n';
+            std::cout << "Data received: " << buffer << '\n';
 
             const char reply[] = "OK\n";
             send(client_fd, reply, static_cast<int>(sizeof(reply) - 1), 0);
