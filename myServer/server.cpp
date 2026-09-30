@@ -13,17 +13,22 @@
     #pragma comment(lib, "ws2_32.lib")
     #define socket_t SOCKET
     #define CLOSE_SOCKET(s) closesocket(s)
+    #define get_tid() GetCurrentThreadId()
     #define SHUT_RDWR SD_BOTH
     #define INVALID_SOCKET_VALUE INVALID_SOCKET
+    #define tid_t DWORD
 
 #elif __linux__
     #include <arpa/inet.h>
     #include <netinet/in.h>
     #include <sys/socket.h>
+    #include <sys/syscall.h>
     #include <unistd.h>
     #define socket_t int
     #define CLOSE_SOCKET(s) close(s)
+    #define get_tid() syscall(SYS_gettid)
     #define INVALID_SOCKET_VALUE -1
+    #define tid_t pid_t
 #endif
 
 struct Client
@@ -44,6 +49,26 @@ void Print (std::string msgToPrint)
 {
     std::lock_guard <std::mutex> lock(mtx); 
     std::cout << msgToPrint << std::endl;
+}
+
+bool StartUp()
+{
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) 
+    {
+        Print ("Error: WSAStartup failed\n");
+        return false;
+    }
+#endif
+    return true;
+}
+
+void CleanUp()
+{
+#ifdef _WIN32
+    WSACleanup();
+#endif
 }
 
 bool SendMsg(socket_t socket_fd, const char* data, size_t length) 
@@ -98,7 +123,7 @@ void HandleClient (std::shared_ptr <Client> client)
     int bytes_received;
     
     while ((bytes_received = recv(client->fd, buffer, sizeof(buffer) - 1, 0)) > 0) 
-	{
+    {
         buffer[bytes_received] = '\0';
 
         Print (prefix + "Data received: " + buffer + "\n");
@@ -113,9 +138,11 @@ void HandleClient (std::shared_ptr <Client> client)
 */
 void HandleAccept (socket_t server_fd)
 {
+    tid_t tid = get_tid();
+    Print ("Thread ID: " + std::to_string(tid));
     //int cur_client_id = 1;
     while (serverUp) 
-	{
+    {
         sockaddr_in client_address;
         socklen_t client_size = sizeof(client_address);
 
@@ -126,7 +153,7 @@ void HandleAccept (socket_t server_fd)
         );
 
         if (client_fd < 0) 
-		{
+        {
             Print ("Error: accept() failed\n");
             if (errno == EINTR)
                 break;
@@ -157,22 +184,14 @@ void HandleAccept (socket_t server_fd)
         client->comments = "";
 
         clientmap[client_fd] = std::move(client);
-        //std::thread client_th(HandleClient, client);
-        //client_th.detach();
     }
     Print ("Server exited.");
 }
 
 int main() 
 {
-#ifdef _WIN32
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) 
-	{
-        Print ("Error: WSAStartup failed\n");
+    if (!StartUp())
         return 1;
-    }
-#endif
 
     const unsigned short port = 50005;
     //const char* server_ip = "127.0.0.1";
@@ -180,7 +199,7 @@ int main()
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) 
-	{
+    {
         Print ("Error: socket() failed\n");
         return 1;
     }
@@ -198,14 +217,14 @@ int main()
     address.sin_port = htons(port);
 
     if (bind(server_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) 
-	{
+    {
         Print ("Error: bind failed\n");
         CLOSE_SOCKET(server_fd);
         return 1;
     }
 
     if (listen(server_fd, 10) < 0) 
-	{
+    {
         Print ("Error: listen failed\n");
         CLOSE_SOCKET(server_fd);
         return 1;
@@ -260,12 +279,14 @@ int main()
 
     //server_fd is no longer usable, unblocks accept()
     shutdown(server_fd, SHUT_RDWR);
+
+    Print ("Waiting for thread to finish.");
     accept_thread.join();
+    Print ("Thread joined.");
+
     CLOSE_SOCKET(server_fd);
 
-#ifdef _WIN32
-    WSACleanup();
-#endif
+    CleanUp();
 
     return 0;
 }
