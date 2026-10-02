@@ -1,85 +1,49 @@
-#include <iostream>
-#include <cstring>
-#include <memory>
-#include <thread>
-#include <mutex>
-#include <atomic>
-#include <signal.h>
-#include <unordered_map>
+#include "server.h"
 
-#ifdef _WIN32
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-    #define socket_t SOCKET
-    #define CLOSE_SOCKET(s) closesocket(s)
-    #define get_tid() GetCurrentThreadId()
-    #define SHUT_RDWR SD_BOTH
-    #define INVALID_SOCKET_VALUE INVALID_SOCKET
-    #define tid_t DWORD
-
-#elif __linux__
-    #include <arpa/inet.h>
-    #include <netinet/in.h>
-    #include <sys/socket.h>
-    #include <sys/syscall.h>
-    #include <unistd.h>
-    #define socket_t int
-    #define CLOSE_SOCKET(s) close(s)
-    #define get_tid() syscall(SYS_gettid)
-    #define INVALID_SOCKET_VALUE -1
-    #define tid_t pid_t
-#endif
-
-struct Client
+void RecvFile(socket_t client_fd)
 {
-    //int id;
-    int fd;
-    std::string ip;
-    std::string os;
-    std::string comments;
-};
+    char header[256] = {0};
+    recv(client_fd, header, sizeof(header)-1, 0);
 
-std::unordered_map <socket_t, std::unique_ptr<Client>> clientmap;
-std::atomic<bool> serverUp {true};
-std::mutex mtx;
-socket_t server_fd = INVALID_SOCKET_VALUE;
+    char filename[256] = {0};
+    long filesize;
+    sscanf(header, "%s %ld", filename, &filesize);
 
-void Print (std::string msgToPrint)
-{
-    std::lock_guard <std::mutex> lock(mtx); 
-    std::cout << msgToPrint << std::endl;
-}
-
-bool StartUp()
-{
-#ifdef _WIN32
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) 
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) 
     {
-        Print ("Error: WSAStartup failed\n");
-        return false;
+        Print ("Error: cannot open file to write.");
+        return;
     }
-#endif
-    return true;
-}
 
-void CleanUp()
-{
-#ifdef _WIN32
-    WSACleanup();
-#endif
+    Print ("Receiving and writing to file");
+    char buf[65536] = {0};
+    long total = 0;
+    while (total < filesize)
+    {
+        ssize_t r = recv(client_fd, buf, sizeof(buf), 0);
+        if (r <= 0)
+        {
+            Print ("Error: recv failed");
+            break;
+        }
+        write(fd, buf, r);
+        total += r;
+    }
+    close(fd);
 }
 
 bool SendMsg(socket_t socket_fd, const char* data, size_t length) 
 {
-    Print ("Message sent: " + std::string(data));
+    Print ("Message to send: " + std::string(data));
 
     while (length > 0) 
     {
         int sent = send(socket_fd, data, static_cast<int>(length), 0);
 
-        if (sent <= 0) {
+        if (sent <= 0)
+        {
+            Print ("Error: send failed");
             return false;
         }
 
@@ -105,37 +69,6 @@ std::string RecvMsg(socket_t client_fd)
     return response;
 }
 
-void OnSIGINT(int)
-{
-    serverUp = false;
-    shutdown(server_fd, SHUT_RDWR);
-}
-/*
-void HandleClient (std::shared_ptr <Client> client)
-{
-    std::string prefix = "client-" + std::to_string(client->fd) + ": ";
-
-    Print (prefix + "Worker thread started\n");
-
-    char buffer[4096];
-    memset (buffer, '\0', sizeof(buffer));
-
-    int bytes_received;
-    
-    while ((bytes_received = recv(client->fd, buffer, sizeof(buffer) - 1, 0)) > 0) 
-    {
-        buffer[bytes_received] = '\0';
-
-        Print (prefix + "Data received: " + buffer + "\n");
-
-        const char reply[] = "OK\n";
-        send(client->fd, reply, static_cast<int>(sizeof(reply) - 1), 0);
-    }
-
-    Print (prefix + "Client disconnected\n");
-    CLOSE_SOCKET(client->fd);
-}
-*/
 void HandleAccept (socket_t server_fd)
 {
     tid_t tid = get_tid();
@@ -233,6 +166,7 @@ int main()
     Print ("Server listening on port " + std::to_string(port) + '\n');
 
     std::thread accept_thread(HandleAccept, server_fd);
+    SLEEP(3);
 
     int choice;
     while (true)
@@ -257,13 +191,22 @@ int main()
             case 2:
             {
                 socket_t client_fd;
-                std::string msg = "Are you alive?";
+                //std::string msg = "Are you alive?";
+                std::string msg = "";
                 Print ("Client Id: ");
                 std::cin >> client_fd;
                 Print ("Message: ");
                 //std::getline (std::cin, msg);
+                std::cin >> msg;
                 SendMsg(client_fd, msg.c_str(), msg.size());
-                RecvMsg(client_fd);
+                if (msg == "sfile")
+                {
+                    RecvFile(client_fd);
+                }
+                else
+                {
+                    RecvMsg(client_fd);
+                }
             }
             break;
 

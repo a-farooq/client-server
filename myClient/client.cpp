@@ -1,49 +1,42 @@
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <string>
+#include "client.h"
 
-#ifdef _WIN32
-    #include <winsock2.h> //must come first
-    #include <ws2tcpip.h>
-    //#pragma comment(lib, "ws2_32.lib")
-    typedef SOCKET socket_t;
-    #define CLOSE_SOCKET(s) closesocket(s)
-    #define SLEEP(sec) Sleep(sec)
-    #define WSACLEANUP() WSACleanup()
-    #define INVALID_SOCKET_VALUE INVALID_SOCKET
-    #define GET_ERRNO() WSAGetLastError()
-
-#elif __linux__
-    #include <arpa/inet.h>
-    #include <netinet/in.h>
-    #include <sys/socket.h>
-    #include <unistd.h>
-    typedef int socket_t;
-    #define CLOSE_SOCKET(s) close(s)
-    #define SLEEP(sec) sleep(sec)
-    #define WSACLEANUP() 
-    #define INVALID_SOCKET_VALUE -1
-    #define GET_ERRNO() errno
-
-#endif
-
-int StartUp()
+void SendFile(socket_t sock_fd, const char* path)
 {
-#ifdef _WIN32
-    WSADATA wsa_data;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) 
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) 
     {
-        std::cerr << "WSAStartup failed\n";
-        return 1;
+        Print ("Error: cannot open file");
+        return;
     }
-#endif
-    return 0;
-}
 
-void Print (std::string msgToPrint)
-{
-    std::cout << msgToPrint << std::endl;
+    struct stat st;
+    fstat(fd, &st);
+
+    //send filename + size as header
+    char header[256] = {0};
+    snprintf(header, sizeof(header), "%s %ld\n", path, (long)st.st_size);
+
+    send(sock_fd, header, strlen(header), 0);
+
+    //send file data in chunks
+    char buf[65536];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0)
+    {
+        ssize_t sent = 0;
+        while (sent < n)
+        {
+            ssize_t r = send(sock_fd, buf + sent, n - sent, 0);
+            if (r <= 0)
+            {
+                Print ("Error: cannot send");
+                close(fd);
+                return;
+            }
+            sent += r;
+        }
+    }
+    close(fd);
 }
 
 bool SendMsg(socket_t sock, const char* data, size_t length) 
@@ -76,62 +69,13 @@ ssize_t RecvMsg(socket_t sock_fd)
     {
         buffer[bytes_received] = '\0';
         Print (prefix + "Data received: " + buffer + "\n");
+
+        if (!strncmp(buffer, "sfile", 5))
+        {
+            SendFile(sock_fd, "output.log");
+        }
     }
     return bytes_received;
-}
-
-std::string GetOSInfo()
-{
-    std::string os = "";
-#ifdef _WIN32
-    OSVERSIONINFOEXW version = {};
-    version.dwOSVersionInfoSize = sizeof(version);
-
-    SYSTEM_INFO system_info;
-    GetNativeSystemInfo(&system_info);
-
-    os = "Windows";
-/*
-    if (GetVersionExW(
-            reinterpret_cast<LPOSVERSIONINFOW>(&version))) {
-        os += " ";
-        os += version.dwMajorVersion;
-        os += ".";
-        os += version.dwMinorVersion; 
-        os += " (Build ";
-        os += version.dwBuildNumber;
-        os += "), ";
-    }
-
-    os += "Architecture: ";
-
-    switch (system_info.wProcessorArchitecture) {
-        case PROCESSOR_ARCHITECTURE_AMD64:
-            os += "x86-64";
-            break;
-        case PROCESSOR_ARCHITECTURE_ARM64:
-            os += "ARM64";
-            break;
-        case PROCESSOR_ARCHITECTURE_INTEL:
-            os += "x86";
-            break;
-        default:
-            os += "Unknown";
-            break;
-    }*/
-#elif __linux__
-    os = "Linux";
-    /*
-    struct utsname info;
-
-    if (uname(&info) == 0) {
-        os = "OS: " + info.sysname + ',';
-        os += "Release: " + info.release + ',';
-        os += "Version: " + info.version + ',';
-        os += "Architecture: " + info.machine + ',';
-    }*/
-#endif    
-    return os;
 }
 
 int main(int argc, char* argv[]) 
@@ -194,7 +138,7 @@ int main(int argc, char* argv[])
             connected = true;
             std::cout << "Connected to " << server_ip << ":" << port << '\n';
 
-            std::string message = GetOSInfo();
+            std::string message = PLATFORM;
             SendMsg(sock, message.c_str(), message.size());
             break;
         }
@@ -211,7 +155,8 @@ int main(int argc, char* argv[])
             sock = INVALID_SOCKET_VALUE;
             continue;
         }
-        std::string message = "YES";
+
+        std::string message = "Done";
         SendMsg(sock, message.c_str(), message.size());
     }
 
