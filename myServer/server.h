@@ -11,14 +11,19 @@
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <stdlib.h>  // _byteswap_uint64
+
     #pragma comment(lib, "ws2_32.lib")
     #define socket_t SOCKET
     #define CLOSE_SOCKET(s) closesocket(s)
-    #define SLEEP(sec) Sleep(sec)
+    #define SLEEP(sec) Sleep(sec*1000)
     #define get_tid() GetCurrentThreadId()
     #define SHUT_RDWR SD_BOTH
     #define INVALID_SOCKET_VALUE INVALID_SOCKET
     #define tid_t DWORD
+
+    uint64_t be64toh(uint64_t x) { return _byteswap_uint64(x); }
+    uint64_t htobe64(uint64_t x) { return _byteswap_uint64(x); }
 
 #elif __linux__
     #include <arpa/inet.h>
@@ -26,6 +31,8 @@
     #include <sys/socket.h>
     #include <sys/syscall.h>
     #include <unistd.h>
+    #include <endian.h>
+
     #define socket_t int
     #define CLOSE_SOCKET(s) close(s)
     #define SLEEP(sec) sleep(sec)

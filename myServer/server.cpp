@@ -1,36 +1,88 @@
 #include "server.h"
 
+ssize_t recv_exactly(int fd, char* buf, size_t len)
+{
+    size_t total = 0;
+    while (total < len)
+    {
+        ssize_t bytes_received = recv(fd, buf + total, len - total, 0);
+        if (bytes_received <= 0)
+            return -1;
+
+        total += bytes_received;
+    }
+    return (ssize_t)total;
+}
+
 void RecvFile(socket_t client_fd)
 {
-    char header[256] = {0};
-    recv(client_fd, header, sizeof(header)-1, 0);
+    // 1. Filename length
+    uint32_t name_len;
+    if (recv_exactly(client_fd, (char*)&name_len, 4) < 0)
+        return;
 
-    char filename[256] = {0};
-    long filesize;
-    sscanf(header, "%s %ld", filename, &filesize);
+    Print ("name_len: " + std::to_string(name_len));
 
-    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) 
+    if(name_len <= 0)
     {
-        Print ("Error: cannot open file to write.");
+        Print ("Error in receiving file");
         return;
     }
 
-    Print ("Receiving and writing to file");
-    char buf[65536] = {0};
-    long total = 0;
-    while (total < filesize)
+    name_len = ntohl(name_len);
+
+    // 2. Filename
+    char filename[name_len + 1];
+    if (recv_exactly(client_fd, filename, name_len) < 0)
+        return;
+
+    filename[name_len] = '\0';
+    Print ("file name: " + std::string(filename));
+
+    // 3. File size
+    uint64_t file_size;
+    if (recv_exactly(client_fd, (char*)&file_size, 8) < 0)
+        return;
+
+    file_size = be64toh(file_size);
+    Print ("file size: " + std::to_string(file_size));
+
+    // 4. File data
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
     {
-        ssize_t r = recv(client_fd, buf, sizeof(buf), 0);
-        if (r <= 0)
+        perror("Error: open failed."); 
+        return;
+    }
+
+    char buf[65536];
+    uint64_t total = 0;
+    while (total < file_size)
+    {
+        size_t to_read = (file_size - total > sizeof(buf)) ? sizeof(buf) : (size_t)(file_size - total);
+        ssize_t n = recv(client_fd, buf, to_read, 0);
+        if (n <= 0)
         {
-            Print ("Error: recv failed");
+            perror("Error: recv failed.");
             break;
         }
-        write(fd, buf, r);
-        total += r;
+
+        size_t written = 0;
+        while (written < (size_t)n)
+        {
+            ssize_t w = write(fd, buf + written, n - written);
+            if (w < 0)
+            {
+                perror("Error: write failed");
+                break;
+            }
+            written += w;
+        }
+        total += n;
     }
+
     close(fd);
+    printf("Received: %s (%llu bytes)\n", filename, (unsigned long long)file_size);
 }
 
 bool SendMsg(socket_t socket_fd, const char* data, size_t length) 
@@ -39,33 +91,40 @@ bool SendMsg(socket_t socket_fd, const char* data, size_t length)
 
     while (length > 0) 
     {
-        int sent = send(socket_fd, data, static_cast<int>(length), 0);
-
-        if (sent <= 0)
+        int bytes_sent = send(socket_fd, data, static_cast<int>(length), 0);
+        if (bytes_sent <= 0)
         {
             Print ("Error: send failed");
             return false;
         }
 
-        data += sent;
-        length -= static_cast<size_t>(sent);
+        //move pointer by sent bytes
+        data += bytes_sent;
+        //update length of unsent bytes
+        length -= static_cast<size_t>(bytes_sent);
     }
+
+    Print ("Returning true");
 
     return true;
 }
 
 std::string RecvMsg(socket_t client_fd)
 {
-    char buffer[4096];
-    memset (buffer, '\0', sizeof(buffer));
-    int bytes_received;
-    std::string prefix = "client-" + std::to_string(client_fd) + ": ";
+    char buffer[4096] = {0};
+    //memset (buffer, '\0', sizeof(buffer));
+    std::string response = "";
+    std::string prefix = "(client-" + std::to_string(client_fd) + ") ";
 
-    bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-    buffer[bytes_received] = '\0';
+    int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_received > 0)
+    {
+        buffer[bytes_received] = '\0';
 
-    Print (prefix + "Data received: " + buffer + "\n");
-    std::string response(buffer);
+        response = std::string(buffer);
+
+        Print (prefix + "Msg received: " + response + "\n");
+    }
     return response;
 }
 
@@ -165,8 +224,10 @@ int main()
 
     Print ("Server listening on port " + std::to_string(port) + '\n');
 
+    Print ("Server PID: " + std::to_string(getpid()));
+
     std::thread accept_thread(HandleAccept, server_fd);
-    SLEEP(3);
+    SLEEP(5);
 
     int choice;
     while (true)

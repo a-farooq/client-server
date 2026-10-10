@@ -4,6 +4,7 @@
 //#include <fstream>
 #include <string>
 #include <fcntl.h>
+#include <cstdint>
 
 #ifdef _WIN32
     #include <winsock2.h> //must come first
@@ -12,17 +13,22 @@
     #define PLATFORM "Windows"
     #define socket_t SOCKET 
     #define CLOSE_SOCKET(s) closesocket(s)
-    #define SLEEP(sec) Sleep(sec)
+    #define SLEEP(sec) Sleep(sec*1000)
     #define WSACLEANUP() WSACleanup()
     #define INVALID_SOCKET_VALUE INVALID_SOCKET
     #define GET_ERRNO() WSAGetLastError()
+
+    uint64_t be64toh(uint64_t x) { return _byteswap_uint64(x); }
+    uint64_t htobe64(uint64_t x) { return _byteswap_uint64(x); }
 
 #elif __linux__
     #include <arpa/inet.h>
     #include <netinet/in.h>
     #include <sys/socket.h>
     #include <sys/stat.h>
+    #include <sys/sendfile.h>
     #include <unistd.h>
+
     #define PLATFORM "Linux"
     #define socket_t int 
     #define CLOSE_SOCKET(s) close(s)

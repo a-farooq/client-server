@@ -1,79 +1,136 @@
 #include "client.h"
 
-void SendFile(socket_t sock_fd, const char* path)
+void send_all(int fd, const char* buf, size_t len)
+{
+    size_t total = 0;
+    while (total < len)
+    {
+        ssize_t bytes_sent = send(fd, buf + total, len - total, 0);
+        if (bytes_sent <= 0)
+        {
+            perror("Error: send failed");
+            return;
+        }
+        total += bytes_sent;
+    }
+}
+
+void SendFileData(socket_t sock_fd, int fd, long int file_size)
+{
+#ifdef _WIN32
+    char buf[65536];
+    while (true)
+    {
+        ssize_t bytes_read = read(fd, buf, sizeof(buf));
+        if (bytes_read <= 0)
+            break;
+
+        send_all(sock_fd, buf, (size_t)bytes_read);
+    }
+#elif __linux__
+    off_t offset = 0;
+    while (offset < file_size)
+    {
+        ssize_t r = sendfile(sock_fd, fd, &offset, file_size - offset);
+        if (r <= 0)
+        {
+            perror("Error: sendfile failed");
+            break;
+        }
+    }
+#endif
+}
+
+bool SendFile(socket_t sock_fd, const char* path)
 {
     int fd = open(path, O_RDONLY);
-    if (fd < 0) 
+    if (fd < 0)
     {
-        Print ("Error: cannot open file");
-        return;
+        Print ("Error: open failed");
+        return false;
     }
+
+    Print ("File opened for read");
 
     struct stat st;
     fstat(fd, &st);
 
-    //send filename + size as header
-    char header[256] = {0};
-    snprintf(header, sizeof(header), "%s %ld\n", path, (long)st.st_size);
+    // 1. Filename length
+    uint32_t name_len = htonl((uint32_t)strlen(path));
+    send_all(sock_fd, (char*)&name_len, 4);
 
-    send(sock_fd, header, strlen(header), 0);
+    // 2. Filename
+    send_all(sock_fd, path, strlen(path));
 
-    //send file data in chunks
-    char buf[65536];
-    ssize_t n;
-    while ((n = read(fd, buf, sizeof(buf))) > 0)
-    {
-        ssize_t sent = 0;
-        while (sent < n)
-        {
-            ssize_t r = send(sock_fd, buf + sent, n - sent, 0);
-            if (r <= 0)
-            {
-                Print ("Error: cannot send");
-                close(fd);
-                return;
-            }
-            sent += r;
-        }
-    }
+    // 3. File size
+    uint64_t file_size = htobe64((uint64_t)st.st_size);
+    send_all(sock_fd, (char*)&file_size, 8);
+
+    // 4. File data (zero-copy)
+    SendFileData(sock_fd, fd, st.st_size);
+
     close(fd);
+    return true;
 }
 
 bool SendMsg(socket_t sock, const char* data, size_t length) 
 {
-    Print ("Message sent: " + std::string(data));
+    Print ("Message to send: " + std::string(data));
 
     while (length > 0) 
     {
-        int sent = send(sock, data, static_cast<int>(length), 0);
-
-        if (sent <= 0) {
+        int bytes_sent = send(sock, data, static_cast<int>(length), 0);
+        if (bytes_sent <= 0)
+        {
+            Print ("Error: send failed");
             return false;
         }
 
-        data += sent;
-        length -= static_cast<size_t>(sent);
+        //move pointer by sent bytes
+        data += bytes_sent;
+        //update length of unsent bytes
+        length -= static_cast<size_t>(bytes_sent);
     }
-    
+
+    Print ("Returning true");
+
     return true;
 }
 
 ssize_t RecvMsg(socket_t sock_fd)
 {
-    char buffer[4096];
-    memset (buffer, '\0', sizeof(buffer));
+    char buffer[4096] = {0};
+    //memset (buffer, '\0', sizeof(buffer));
     std::string prefix = "client-" + std::to_string(sock_fd) + ": ";
 
     ssize_t bytes_received = recv(sock_fd, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received > 0)
     {
         buffer[bytes_received] = '\0';
-        Print (prefix + "Data received: " + buffer + "\n");
+        std::string response(buffer);
+        Print (prefix + "Msg received: " + response + "\n");
 
         if (!strncmp(buffer, "sfile", 5))
         {
-            SendFile(sock_fd, "output.log");
+            if (!SendFile(sock_fd, "client.log"))
+            {
+                std::string message = "-1";
+                SendMsg(sock_fd, message.c_str(), message.size());
+            }
+            else
+            {
+                Print ("File sent");
+            }
         }
+        else
+        {
+            std::string message = "Done";
+            SendMsg(sock_fd, message.c_str(), message.size());
+        }
+    }
+    else
+    {
+        Print ("Error: recv failed");
     }
     return bytes_received;
 }
@@ -130,7 +187,11 @@ int main(int argc, char* argv[])
             {
                std::cerr << "Could not connect to " << server_ip << ":" << port << '\n';
                 std::cout << "Retrying..." << std::endl;
+                //auto t1 = std::chrono::steady_clock::now();
                 SLEEP (10);
+                //auto t2 = std::chrono::steady_clock::now();
+                //auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+                //std::cout << "Slept for " << (long long)ms << "ms\n";
                 continue;
                 //CLOSE_SOCKET(sock);
                 //WSACLEANUP();
