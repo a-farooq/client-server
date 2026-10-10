@@ -47,6 +47,9 @@ bool SendFile(socket_t sock_fd, const char* path)
     if (fd < 0)
     {
         Print ("Error: open failed");
+        std::string error_msg = "ERR";
+        send_all(sock_fd, error_msg.c_str(), 4);
+
         return false;
     }
 
@@ -104,7 +107,11 @@ ssize_t RecvMsg(socket_t sock_fd)
     std::string prefix = "client-" + std::to_string(sock_fd) + ": ";
 
     ssize_t bytes_received = recv(sock_fd, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_received > 0)
+    if (bytes_received <= 0)
+    {
+        Print ("Error: recv failed");
+    }
+    else
     {
         buffer[bytes_received] = '\0';
         std::string response(buffer);
@@ -114,8 +121,7 @@ ssize_t RecvMsg(socket_t sock_fd)
         {
             if (!SendFile(sock_fd, "client.log"))
             {
-                std::string message = "-1";
-                SendMsg(sock_fd, message.c_str(), message.size());
+                Print ("Error: File not sent");
             }
             else
             {
@@ -127,10 +133,6 @@ ssize_t RecvMsg(socket_t sock_fd)
             std::string message = "Done";
             SendMsg(sock_fd, message.c_str(), message.size());
         }
-    }
-    else
-    {
-        Print ("Error: recv failed");
     }
     return bytes_received;
 }
@@ -217,8 +219,8 @@ int main(int argc, char* argv[])
             continue;
         }
 
-        std::string message = "Done";
-        SendMsg(sock, message.c_str(), message.size());
+        //std::string message = "Done";
+        //SendMsg(sock, message.c_str(), message.size());
     }
 
     CLOSE_SOCKET(sock);

@@ -3,25 +3,36 @@
 ssize_t recv_exactly(int fd, char* buf, size_t len)
 {
     size_t total = 0;
+    //Print ("Start recv_exactly");
     while (total < len)
     {
         ssize_t bytes_received = recv(fd, buf + total, len - total, 0);
+        //Print ("buf: " + std::string(buf));
         if (bytes_received <= 0)
+        {
+            Print ("Error: recv failed");
             return -1;
-
+        }
+        if (!strncmp(buf, "ERR", 5))
+        {
+            Print ("Error: File open failed");
+            return -1;
+        }
         total += bytes_received;
     }
+    //Print ("End recv_exactly");
     return (ssize_t)total;
 }
 
 void RecvFile(socket_t client_fd)
 {
+    //Print ("Start RecvFile");
     // 1. Filename length
     uint32_t name_len;
     if (recv_exactly(client_fd, (char*)&name_len, 4) < 0)
         return;
 
-    Print ("name_len: " + std::to_string(name_len));
+    //Print ("name_len: " + std::to_string(name_len));
 
     if(name_len <= 0)
     {
@@ -30,6 +41,7 @@ void RecvFile(socket_t client_fd)
     }
 
     name_len = ntohl(name_len);
+    Print ("name_len: " + std::to_string(name_len));
 
     // 2. Filename
     char filename[name_len + 1];
@@ -55,34 +67,38 @@ void RecvFile(socket_t client_fd)
         return;
     }
 
-    char buf[65536];
+    char buf[65536] = {0};
     uint64_t total = 0;
     while (total < file_size)
     {
         size_t to_read = (file_size - total > sizeof(buf)) ? sizeof(buf) : (size_t)(file_size - total);
-        ssize_t n = recv(client_fd, buf, to_read, 0);
-        if (n <= 0)
+        ssize_t bytes_received = recv(client_fd, buf, to_read, 0);
+        if (bytes_received <= 0)
         {
             perror("Error: recv failed.");
             break;
         }
 
-        size_t written = 0;
-        while (written < (size_t)n)
+        size_t total_written = 0;
+        while (total_written < (size_t)bytes_received)
         {
-            ssize_t w = write(fd, buf + written, n - written);
-            if (w < 0)
+            ssize_t bytes_written = write(fd, buf + total_written, bytes_received - total_written);
+            if (bytes_written < 0)
             {
                 perror("Error: write failed");
                 break;
             }
-            written += w;
+            total_written += bytes_written;
         }
-        total += n;
+        total += bytes_received;
     }
 
     close(fd);
-    printf("Received: %s (%llu bytes)\n", filename, (unsigned long long)file_size);
+
+    char output[4096] = {0};
+    sprintf(output, "Received: %s (%llu bytes)\n", filename, (unsigned long long)file_size);
+    Print (std::string(output));
+    //Print ("End RecvFile");
 }
 
 bool SendMsg(socket_t socket_fd, const char* data, size_t length) 
@@ -230,9 +246,10 @@ int main()
     SLEEP(5);
 
     int choice;
+    socket_t client_fd;
     while (true)
     {
-        Print ("Choices:\n1. List Out Clients\n2. Send Message\n3. Reset\n");
+        Print ("Choices:\n1. List Out Clients\n2. Send Command\n3. Recv File\n4. Send File\n5. Reset\n");
         Print ("Enter choice: ");
         std::cin >> choice;
         switch (choice)
@@ -251,27 +268,39 @@ int main()
 
             case 2:
             {
-                socket_t client_fd;
                 //std::string msg = "Are you alive?";
-                std::string msg = "";
+                std::string cmd = "";
                 Print ("Client Id: ");
                 std::cin >> client_fd;
-                Print ("Message: ");
+                Print ("Command: ");
                 //std::getline (std::cin, msg);
-                std::cin >> msg;
-                SendMsg(client_fd, msg.c_str(), msg.size());
-                if (msg == "sfile")
-                {
-                    RecvFile(client_fd);
-                }
-                else
-                {
-                    RecvMsg(client_fd);
-                }
+                std::cin >> cmd;
+                SendMsg(client_fd, cmd.c_str(), cmd.size());
+                RecvMsg(client_fd);
             }
             break;
 
             case 3:
+            {
+                Print ("Client Id: ");
+                std::cin >> client_fd;
+                std::string cmd = "sfile";
+                SendMsg(client_fd, cmd.c_str(), cmd.size());
+                RecvFile(client_fd);
+            }
+            break;
+
+            case 4:
+            {
+                //Print ("Client Id: ");
+                //std::cin >> client_fd;
+                //std::string cmd = "rfile";
+                //SendMsg(client_fd, cmd.c_str(), cmd.size());
+                //SendFile(client_fd, "server.log");
+            }
+            break;
+
+            case 5:
             break;
 
             default:
