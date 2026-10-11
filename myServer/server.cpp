@@ -226,58 +226,6 @@ std::string RecvMsg(socket_t client_fd)
     return response;
 }
 
-void HandleAccept (socket_t server_fd)
-{
-    tid_t tid = get_tid();
-    Print ("Thread ID: " + std::to_string(tid));
-    //int cur_client_id = 1;
-    while (serverUp) 
-    {
-        sockaddr_in client_address;
-        socklen_t client_size = sizeof(client_address);
-
-        socket_t client_fd = accept(
-            server_fd,
-            reinterpret_cast<sockaddr*>(&client_address),
-            &client_size
-        );
-
-        if (client_fd < 0) 
-        {
-            Print ("Error: accept() failed\n");
-            if (errno == EINTR)
-                break;
-            continue;
-        }
-
-        char client_ip[INET_ADDRSTRLEN] = {};
-        inet_ntop(AF_INET, &client_address.sin_addr, client_ip, sizeof(client_ip));
-
-        Print ("Client connected from: " + std::string(client_ip) + '\n');
-
-        //char buffer[4096];
-        //memset (buffer, '\0', sizeof(buffer));
-
-        //int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-        //buffer[bytes_received] = '\0';
-
-        //std::string platform = std::string(buffer);
-        //Print ("Client details: " + platform + "\n");
-        std::string platform = RecvMsg (client_fd);
-
-        //Create client object
-        std::unique_ptr<Client> client(new Client);
-        //client->id = cur_client_id++;
-        client->fd = client_fd;
-        client->ip = client_ip;
-        client->os = platform;
-        client->comments = "";
-
-        clientmap[client_fd] = std::move(client);
-    }
-    Print ("Server exited.");
-}
-
 int main() 
 {
     if (!StartUp())
@@ -324,7 +272,7 @@ int main()
 
     Print ("Server PID: " + std::to_string(getpid()));
 
-    std::thread accept_thread(HandleAccept, server_fd);
+    std::thread accept_thread(AcceptHandler, server_fd);
     SLEEP(5);
 
     int choice;
@@ -378,7 +326,9 @@ int main()
                 std::cin >> client_fd;
                 std::string cmd = "rfile";
                 SendMsg(client_fd, cmd.c_str(), cmd.size());
-                SendFile(client_fd, "server.log");
+                bool ret = SendFile(client_fd, "server.log");
+                if (ret) Print ("File sent");
+                else Print ("File not sent");
             }
             break;
 
