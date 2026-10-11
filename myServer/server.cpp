@@ -101,7 +101,7 @@ void RecvFile(socket_t client_fd)
     //Print ("End RecvFile");
 }
 
-void send_all(int fd, const char* buf, size_t len)
+bool send_all(int fd, const char* buf, size_t len)
 {
     size_t total = 0;
     while (total < len)
@@ -110,14 +110,16 @@ void send_all(int fd, const char* buf, size_t len)
         if (bytes_sent <= 0)
         {
             perror("Error: send failed");
-            return;
+            return false;
         }
         total += bytes_sent;
     }
+    return true;
 }
 
-void SendFileData(socket_t sock_fd, int fd, long int file_size)
+bool SendFileData(socket_t sock_fd, int fd, long int file_size)
 {
+    bool ret = true;
 #ifdef _WIN32
     char buf[65536];
     while (true)
@@ -126,7 +128,8 @@ void SendFileData(socket_t sock_fd, int fd, long int file_size)
         if (bytes_read <= 0)
             break;
 
-        send_all(sock_fd, buf, (size_t)bytes_read);
+        ret = send_all(sock_fd, buf, (size_t)bytes_read);
+        if (!ret) break;
     }
 #elif __linux__
     off_t offset = 0;
@@ -136,10 +139,12 @@ void SendFileData(socket_t sock_fd, int fd, long int file_size)
         if (r <= 0)
         {
             perror("Error: sendfile failed");
+            ret = false;
             break;
         }
     }
 #endif
+    return ret;
 }
 
 bool SendFile(socket_t sock_fd, const char* path)
@@ -156,25 +161,26 @@ bool SendFile(socket_t sock_fd, const char* path)
 
     Print ("File opened for read");
 
+    bool ret = true;
     struct stat st;
     fstat(fd, &st);
 
     // 1. Filename length
     uint32_t name_len = htonl((uint32_t)strlen(path));
-    send_all(sock_fd, (char*)&name_len, 4);
+    ret = send_all(sock_fd, (char*)&name_len, 4);
 
     // 2. Filename
-    send_all(sock_fd, path, strlen(path));
+    ret = send_all(sock_fd, path, strlen(path));
 
     // 3. File size
     uint64_t file_size = htobe64((uint64_t)st.st_size);
-    send_all(sock_fd, (char*)&file_size, 8);
+    ret = send_all(sock_fd, (char*)&file_size, 8);
 
     // 4. File data (zero-copy)
-    SendFileData(sock_fd, fd, st.st_size);
+    ret = SendFileData(sock_fd, fd, st.st_size);
 
     close(fd);
-    return true;
+    return ret;
 }
 
 bool SendMsg(socket_t socket_fd, const char* data, size_t length) 
