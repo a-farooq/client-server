@@ -30,6 +30,8 @@
     #include <netinet/in.h>
     #include <sys/socket.h>
     #include <sys/syscall.h>
+    #include <sys/stat.h>
+    #include <sys/sendfile.h>
     #include <unistd.h>
     #include <endian.h>
 

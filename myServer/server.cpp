@@ -101,6 +101,82 @@ void RecvFile(socket_t client_fd)
     //Print ("End RecvFile");
 }
 
+void send_all(int fd, const char* buf, size_t len)
+{
+    size_t total = 0;
+    while (total < len)
+    {
+        ssize_t bytes_sent = send(fd, buf + total, len - total, 0);
+        if (bytes_sent <= 0)
+        {
+            perror("Error: send failed");
+            return;
+        }
+        total += bytes_sent;
+    }
+}
+
+void SendFileData(socket_t sock_fd, int fd, long int file_size)
+{
+#ifdef _WIN32
+    char buf[65536];
+    while (true)
+    {
+        ssize_t bytes_read = read(fd, buf, sizeof(buf));
+        if (bytes_read <= 0)
+            break;
+
+        send_all(sock_fd, buf, (size_t)bytes_read);
+    }
+#elif __linux__
+    off_t offset = 0;
+    while (offset < file_size)
+    {
+        ssize_t r = sendfile(sock_fd, fd, &offset, file_size - offset);
+        if (r <= 0)
+        {
+            perror("Error: sendfile failed");
+            break;
+        }
+    }
+#endif
+}
+
+bool SendFile(socket_t sock_fd, const char* path)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+    {
+        Print ("Error: open failed");
+        std::string error_msg = "ERR";
+        send_all(sock_fd, error_msg.c_str(), 4);
+
+        return false;
+    }
+
+    Print ("File opened for read");
+
+    struct stat st;
+    fstat(fd, &st);
+
+    // 1. Filename length
+    uint32_t name_len = htonl((uint32_t)strlen(path));
+    send_all(sock_fd, (char*)&name_len, 4);
+
+    // 2. Filename
+    send_all(sock_fd, path, strlen(path));
+
+    // 3. File size
+    uint64_t file_size = htobe64((uint64_t)st.st_size);
+    send_all(sock_fd, (char*)&file_size, 8);
+
+    // 4. File data (zero-copy)
+    SendFileData(sock_fd, fd, st.st_size);
+
+    close(fd);
+    return true;
+}
+
 bool SendMsg(socket_t socket_fd, const char* data, size_t length) 
 {
     Print ("Message to send: " + std::string(data));
@@ -292,11 +368,11 @@ int main()
 
             case 4:
             {
-                //Print ("Client Id: ");
-                //std::cin >> client_fd;
-                //std::string cmd = "rfile";
-                //SendMsg(client_fd, cmd.c_str(), cmd.size());
-                //SendFile(client_fd, "server.log");
+                Print ("Client Id: ");
+                std::cin >> client_fd;
+                std::string cmd = "rfile";
+                SendMsg(client_fd, cmd.c_str(), cmd.size());
+                SendFile(client_fd, "server.log");
             }
             break;
 

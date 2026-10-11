@@ -1,5 +1,106 @@
 #include "client.h"
 
+ssize_t recv_exactly(int fd, char* buf, size_t len)
+{
+    size_t total = 0;
+    //Print ("Start recv_exactly");
+    while (total < len)
+    {
+        ssize_t bytes_received = recv(fd, buf + total, len - total, 0);
+        //Print ("buf: " + std::string(buf));
+        if (bytes_received <= 0)
+        {
+            Print ("Error: recv failed");
+            return -1;
+        }
+        if (!strncmp(buf, "ERR", 5))
+        {
+            Print ("Error: File open failed");
+            return -1;
+        }
+        total += bytes_received;
+    }
+    //Print ("End recv_exactly");
+    return (ssize_t)total;
+}
+
+void RecvFile(socket_t client_fd)
+{
+    //Print ("Start RecvFile");
+    // 1. Filename length
+    uint32_t name_len;
+    if (recv_exactly(client_fd, (char*)&name_len, 4) < 0)
+        return;
+
+    //Print ("name_len: " + std::to_string(name_len));
+
+    if(name_len <= 0)
+    {
+        Print ("Error in receiving file");
+        return;
+    }
+
+    name_len = ntohl(name_len);
+    Print ("name_len: " + std::to_string(name_len));
+
+    // 2. Filename
+    char filename[name_len + 1];
+    if (recv_exactly(client_fd, filename, name_len) < 0)
+        return;
+
+    filename[name_len] = '\0';
+    Print ("file name: " + std::string(filename));
+
+    // 3. File size
+    uint64_t file_size;
+    if (recv_exactly(client_fd, (char*)&file_size, 8) < 0)
+        return;
+
+    file_size = be64toh(file_size);
+    Print ("file size: " + std::to_string(file_size));
+
+    // 4. File data
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+    {
+        perror("Error: open failed."); 
+        return;
+    }
+
+    char buf[65536] = {0};
+    uint64_t total = 0;
+    while (total < file_size)
+    {
+        size_t to_read = (file_size - total > sizeof(buf)) ? sizeof(buf) : (size_t)(file_size - total);
+        ssize_t bytes_received = recv(client_fd, buf, to_read, 0);
+        if (bytes_received <= 0)
+        {
+            perror("Error: recv failed.");
+            break;
+        }
+
+        size_t total_written = 0;
+        while (total_written < (size_t)bytes_received)
+        {
+            ssize_t bytes_written = write(fd, buf + total_written, bytes_received - total_written);
+            if (bytes_written < 0)
+            {
+                perror("Error: write failed");
+                break;
+            }
+            total_written += bytes_written;
+        }
+        total += bytes_received;
+    }
+
+    close(fd);
+
+    char output[4096] = {0};
+    sprintf(output, "Received: %s (%llu bytes)\n", filename, (unsigned long long)file_size);
+    Print (std::string(output));
+    //Print ("End RecvFile");
+}
+
 void send_all(int fd, const char* buf, size_t len)
 {
     size_t total = 0;
@@ -127,6 +228,10 @@ ssize_t RecvMsg(socket_t sock_fd)
             {
                 Print ("File sent");
             }
+        }
+        else if (!strncmp(buffer, "rfile", 5))
+        {
+            RecvFile(sock_fd);
         }
         else
         {
