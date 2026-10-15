@@ -13,7 +13,7 @@
     #include <ws2tcpip.h>
     #include <stdlib.h>  // _byteswap_uint64
 
-    #pragma comment(lib, "ws2_32.lib")
+    //#pragma comment(lib, "ws2_32.lib")
     #define socket_t SOCKET
     #define CLOSE_SOCKET(s) closesocket(s)
     #define SLEEP(sec) Sleep(sec*1000)

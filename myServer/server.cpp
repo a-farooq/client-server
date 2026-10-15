@@ -279,11 +279,12 @@ int main()
     socket_t client_fd;
     while (true)
     {
-        Print ("Choices:\n1. List Out Clients\n2. Send Command\n3. Recv File\n4. Send File\n5. Reset\n");
+        Print ("Choices:\n1. List Out Clients\n2. Check Heartbeat\n3. Recv File\n4. Send File\n5. Reset\n");
         Print ("Enter choice: ");
         std::cin >> choice;
         switch (choice)
         {
+            //List out clients
             case 1:
             {
                 for (auto iter = clientmap.begin(); iter != clientmap.end(); iter++)
@@ -296,37 +297,40 @@ int main()
             }
             break;
 
+            //send heartbeat msg
             case 2:
             {
                 //std::string msg = "Are you alive?";
-                std::string cmd = "";
+                std::string cmd = "heartbeat";
                 Print ("Client Id: ");
                 std::cin >> client_fd;
                 Print ("Command: ");
                 //std::getline (std::cin, msg);
-                std::cin >> cmd;
-                SendMsg(client_fd, cmd.c_str(), cmd.size());
-                RecvMsg(client_fd);
+                //std::cin >> cmd;
+                bool ret = SendMsg(client_fd, cmd.c_str(), cmd.size());
+                if (ret) RecvMsg(client_fd);
             }
             break;
 
+            //sendfile msg
             case 3:
             {
                 Print ("Client Id: ");
                 std::cin >> client_fd;
-                std::string cmd = "sfile";
-                SendMsg(client_fd, cmd.c_str(), cmd.size());
-                RecvFile(client_fd);
+                std::string cmd = "sendfile";
+                bool ret = SendMsg(client_fd, cmd.c_str(), cmd.size());
+                if (ret) RecvFile(client_fd);
             }
             break;
 
+            //recvfile msg
             case 4:
             {
                 Print ("Client Id: ");
                 std::cin >> client_fd;
-                std::string cmd = "rfile";
-                SendMsg(client_fd, cmd.c_str(), cmd.size());
-                bool ret = SendFile(client_fd, "server.log");
+                std::string cmd = "recvfile";
+                bool ret = SendMsg(client_fd, cmd.c_str(), cmd.size());
+                if (ret) ret = SendFile(client_fd, "server.log");
                 if (ret) Print ("File sent");
                 else Print ("File not sent");
             }

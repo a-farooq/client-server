@@ -224,7 +224,7 @@ ssize_t RecvMsg(socket_t sock_fd)
         std::string response(buffer);
         Print (prefix + "Msg received: " + response + "\n");
 
-        if (!strncmp(buffer, "sfile", 5))
+        if (!strncmp(buffer, "sendfile", 8))
         {
             if (!SendFile(sock_fd, "client.log"))
             {
@@ -235,9 +235,14 @@ ssize_t RecvMsg(socket_t sock_fd)
                 Print ("File sent");
             }
         }
-        else if (!strncmp(buffer, "rfile", 5))
+        else if (!strncmp(buffer, "recvfile", 8))
         {
             RecvFile(sock_fd);
+        }
+        else if (!strncmp(buffer, "heartbeat", 9))
+        {
+            std::string message = "Hello, I am listening.";
+            SendMsg(sock_fd, message.c_str(), message.size());
         }
         else
         {
@@ -312,7 +317,10 @@ int main(int argc, char* argv[])
             connected = true;
             std::cout << "Connected to " << server_ip << ":" << port << '\n';
 
-            std::string message = PLATFORM;
+            std::string pid = std::to_string(getpid());
+            Print ("Client PID: " + pid);
+
+            std::string message = "Connected from " + std::string(PLATFORM) + " : " + pid;
             SendMsg(sock, message.c_str(), message.size());
             break;
         }
